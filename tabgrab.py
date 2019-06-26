@@ -29,7 +29,7 @@ def intersperse_chords(lyrics, chord_list):
             result += " " * spacing
         else:
             spacing += last_chord_len
-            result += lyrics[pos:pos+spacing]
+            result += lyrics[pos : pos + spacing]
         result += "[{}]".format(chord)
         pos += spacing
         last_chord_len = len(chord)
@@ -59,14 +59,14 @@ def iter_lines(elements):
 
 def is_chord(elem):
     try:
-        return elem.tag == 'a'
+        return elem.tag == "a"
     except Exception:
         return False
 
 
 def is_comment(elem):
     try:
-        return elem.tag == 'strong'
+        return elem.tag == "strong"
     except Exception:
         return False
 
@@ -87,19 +87,23 @@ def create_chordpro(song_url):
     header_section = html.find("div.inner-wrap", first=True)
     body = []
     body.append(directive("title", header_section.find("h3", first=True).text))
-    body.append(directive("artist", header_section.find("a[rel='category tag']", first=True).text))
+    body.append(
+        directive(
+            "artist", header_section.find("a[rel='category tag']", first=True).text
+        )
+    )
     body.append("")
     content_section = html.find("div#cont > pre", first=True)
-    lines = deque(iter_lines(content_section.pq.contents()))
+    lines = deque(iter_lines(content_section.pq.contents().contents()))
 
     in_chorus = False
     while lines:
         line = lines.popleft()
         if line and is_comment(line[0]):
             next, *rest = line[1:]
-            text = line[0].text + next.split(":")[0]
+            text = line[0].text_content() + next.split(":")[0]
             body.append(directive("comment", text))
-            if 'chorus' in text.lower():
+            if "chorus" in text.lower():
                 body.append(directive("start_of_chorus"))
                 in_chorus = True
             if rest:
@@ -115,8 +119,14 @@ def create_chordpro(song_url):
                 else:
                     chords.append((spacing, e.text))
                     spacing = 0
-            next_line = lines.popleft()
-            if all(isinstance(e, str) for e in next_line) and line_to_text(next_line).strip():
+            try:
+                next_line = lines.popleft()
+            except IndexError:
+                next_line = []
+            if (
+                all(isinstance(e, str) for e in next_line)
+                and line_to_text(next_line).strip()
+            ):
                 body.append(intersperse_chords(line_to_text(next_line), chords))
             else:
                 body.append(parse_chords(line))
@@ -132,18 +142,46 @@ def create_chordpro(song_url):
     return "\n".join(body)
 
 
-@click.command()
-@click.argument('url')
-@click.option('--echo/--no-echo', default=True)
-@click.option('--filename')
-def main(url, echo, filename=None):
+@click.group()
+def main():
+    pass
+
+
+@main.command()
+@click.argument("url")
+@click.option("--echo/--no-echo", default=True)
+@click.option("--filename")
+def song(url, echo, filename=None):
     result = create_chordpro(url)
     if echo:
         print(result)
     if filename:
-        with open(filename, 'w') as f:
+        with open(filename, "w") as f:
             f.write(result)
 
 
-if __name__ == '__main__':
+@main.command()
+@click.argument("username")
+@click.argument("password")
+def favorites(username, password):
+    session = requests_html.HTMLSession()
+    resp = session.post(
+        "https://ukutabs.com/wp-login.php",
+        data={
+            "log": username,
+            "pwd": password,
+            "rememberme": "forever",
+            "redirect_to": "https://ukutabs.com/favorites/",
+            "wp-submit": "Log in!",
+        },
+    )
+    # TODO: Pagination
+    for link in resp.html.find(".archivelist>li>a:first-of-type"):
+        url = link.attrs["href"]
+        print(url)
+        result = create_chordpro(url)
+        print(result)
+
+
+if __name__ == "__main__":
     main()
